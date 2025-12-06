@@ -56,15 +56,7 @@ cd "${SLURM_SUBMIT_DIR}" || exit 1
 echo "Working directory: $(pwd)"
 echo ""
 
-$EXEC_PATH $CONTAINER_PATH python -u main.py \
---model-type transformer \
---epochs 4 \
---learning-rate 0.0001 \
---batch-size 128 \
---seq-length 256 \
---vocab-size 10000 \
---d-model 128 \
---dropout 0.1
+$EXEC_PATH $CONTAINER_PATH python -u CGAN.py
 
 EXIT_CODE=$?
 
