@@ -25,4 +25,5 @@ cd "${SLURM_SUBMIT_DIR}" || exit 1
 echo "Running on node: $SLURM_NODELIST"
 $EXEC_PATH $CONTAINER_PATH nvidia-smi
 
+$EXEC_PATH $CONTAINER_PATH python -u classifier.py
 $EXEC_PATH $CONTAINER_PATH python -u CGAN.py
