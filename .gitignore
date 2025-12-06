@@ -8,3 +8,4 @@ train_combined
 attributes.txt
 .DS_Store
 .vscode/launch.json
+*.png
