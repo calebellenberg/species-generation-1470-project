@@ -9,3 +9,4 @@ attributes.txt
 .DS_Store
 .vscode/launch.json
 *.png
+efficientnet_classifier.h5
