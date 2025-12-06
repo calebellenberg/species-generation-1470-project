@@ -77,69 +77,77 @@ def build_discriminator(img_size, num_classes):
     x = layers.LeakyReLU(0.2)(x)
     
     x = layers.Flatten()(x)
-    out = layers.Dense(1, activation='sigmoid')(x)
+    out = layers.Dense(1)(x) 
     
     return models.Model([img_in, label_in], out, name="Discriminator")
 
 class CGAN(tf.keras.Model):
-    def __init__(self, generator, discriminator, classifier, latent_dim, aux_weight=0.5):
+    def __init__(self, generator, discriminator, classifier, latent_dim, aux_weight=0.5, gp_weight=10.0):
         super(CGAN, self).__init__()
         self.generator = generator
         self.discriminator = discriminator
         self.classifier = classifier
         self.latent_dim = latent_dim
         self.aux_weight = aux_weight
+        self.gp_weight = gp_weight
         self.classifier.trainable = False 
 
-    def compile(self, g_optimizer, d_optimizer, loss_fn, cls_loss_fn):
+    def compile(self, g_optimizer, d_optimizer, cls_loss_fn):
         super(CGAN, self).compile()
         self.g_optimizer = g_optimizer
         self.d_optimizer = d_optimizer
-        self.loss_fn = loss_fn
         self.cls_loss_fn = cls_loss_fn
+
+    def gradient_penalty(self, batch_size, real_images, fake_images, labels):
+        alpha = tf.random.normal([batch_size, 1, 1, 1], 0.0, 1.0)
+        diff = fake_images - real_images
+        interpolated = real_images + alpha * diff
+
+        with tf.GradientTape() as gp_tape:
+            gp_tape.watch(interpolated)
+            pred = self.discriminator([interpolated, labels], training=True)
+
+        grads = gp_tape.gradient(pred, [interpolated])[0]
+        norm = tf.sqrt(tf.reduce_sum(tf.square(grads), axis=[1, 2, 3]))
+        gp = tf.reduce_mean((norm - 1.0) ** 2)
+        return gp
 
     def train_step(self, data):
         real_images, labels = data
         batch_size = tf.shape(real_images)[0]
-
-        random_latent_vectors = tf.random.normal(shape=(batch_size, self.latent_dim))
-        generated_images = self.generator([random_latent_vectors, labels])
-
-        real_images_noisy = real_images + tf.random.normal(shape=tf.shape(real_images), stddev=0.1)
-        generated_images_noisy = generated_images + tf.random.normal(shape=tf.shape(generated_images), stddev=0.1)
-
-        combined_images = tf.concat([generated_images_noisy, real_images_noisy], axis=0)
-        combined_labels = tf.concat([labels, labels], axis=0)
         
-        labels_discriminator = tf.concat([
-            tf.zeros((batch_size, 1)),
-            tf.ones((batch_size, 1)) * 0.9
-        ], axis=0)
+        with tf.GradientTape() as tape:
+            random_latent_vectors = tf.random.normal(shape=(batch_size, self.latent_dim))
+            fake_images = self.generator([random_latent_vectors, labels], training=True)
+
+            real_logits = self.discriminator([real_images, labels], training=True)
+            fake_logits = self.discriminator([fake_images, labels], training=True)
+
+            d_cost = tf.reduce_mean(fake_logits) - tf.reduce_mean(real_logits)
+            
+            gp = self.gradient_penalty(batch_size, real_images, fake_images, labels)
+            
+            d_loss = d_cost + (gp * self.gp_weight)
+
+        d_grads = tape.gradient(d_loss, self.discriminator.trainable_weights)
+        self.d_optimizer.apply_gradients(zip(d_grads, self.discriminator.trainable_weights))
 
         with tf.GradientTape() as tape:
-            predictions = self.discriminator([combined_images, combined_labels])
-            d_loss = self.loss_fn(labels_discriminator, predictions)
-
-        grads = tape.gradient(d_loss, self.discriminator.trainable_weights)
-        self.d_optimizer.apply_gradients(zip(grads, self.discriminator.trainable_weights))
-
-        random_latent_vectors = tf.random.normal(shape=(batch_size, self.latent_dim))
-        misleading_labels = tf.ones((batch_size, 1))
-
-        with tf.GradientTape() as tape:
-            fake_imgs = self.generator([random_latent_vectors, labels])
+            random_latent_vectors = tf.random.normal(shape=(batch_size, self.latent_dim))
+            fake_images = self.generator([random_latent_vectors, labels], training=True)
             
-            d_preds = self.discriminator([fake_imgs, labels])
-            g_loss_gan = self.loss_fn(misleading_labels, d_preds)
+            gen_logits = self.discriminator([fake_images, labels], training=True)
             
-            fake_imgs_scaled = (fake_imgs * 127.5) + 127.5
-            c_preds = self.classifier(fake_imgs_scaled)
+            g_loss_wgan = -tf.reduce_mean(gen_logits)
+            
+            fake_imgs_scaled = (fake_images * 127.5) + 127.5
+            c_preds = self.classifier(fake_imgs_scaled, training=False)
             g_loss_class = self.cls_loss_fn(labels, c_preds)
 
-            total_g_loss = g_loss_gan + (self.aux_weight * g_loss_class)
+            total_g_loss = g_loss_wgan + (self.aux_weight * g_loss_class)
 
-        grads = tape.gradient(total_g_loss, self.generator.trainable_weights)
-        self.g_optimizer.apply_gradients(zip(grads, self.generator.trainable_weights))
+        g_grads = tape.gradient(total_g_loss, self.generator.trainable_weights)
+        self.g_optimizer.apply_gradients(zip(g_grads, self.generator.trainable_weights))
 
         return {"d_loss": d_loss, "g_loss": total_g_loss, "class_loss": g_loss_class}
 
@@ -175,9 +183,8 @@ disc = build_discriminator(IMG_SIZE, num_classes)
 cgan = CGAN(gen, disc, classifier_model, NOISE_DIM, aux_weight=0.5)
 
 cgan.compile(
-    g_optimizer=tf.keras.optimizers.Adam(learning_rate=0.0002, beta_1=0.5),
-    d_optimizer=tf.keras.optimizers.Adam(learning_rate=0.0001, beta_1=0.5),
-    loss_fn=tf.keras.losses.BinaryCrossentropy(),
+    g_optimizer=tf.keras.optimizers.Adam(learning_rate=0.0002, beta_1=0.5, beta_2=0.9),
+    d_optimizer=tf.keras.optimizers.Adam(learning_rate=0.0001, beta_1=0.5, beta_2=0.9),
     cls_loss_fn=tf.keras.losses.SparseCategoricalCrossentropy()
 )
 
