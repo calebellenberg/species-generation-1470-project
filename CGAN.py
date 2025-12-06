@@ -82,14 +82,14 @@ def build_discriminator(img_size, num_classes):
     return models.Model([img_in, label_in], out, name="Discriminator")
 
 class CGAN(tf.keras.Model):
-    def __init__(self, generator, discriminator, classifier, latent_dim, aux_weight=2.0):
+    def __init__(self, generator, discriminator, classifier, latent_dim, aux_weight=0.5):
         super(CGAN, self).__init__()
         self.generator = generator
         self.discriminator = discriminator
         self.classifier = classifier
         self.latent_dim = latent_dim
         self.aux_weight = aux_weight
-        self.classifier.trainable = False # Freeze classifier
+        self.classifier.trainable = False 
 
     def compile(self, g_optimizer, d_optimizer, loss_fn, cls_loss_fn):
         super(CGAN, self).compile()
@@ -105,10 +105,16 @@ class CGAN(tf.keras.Model):
         random_latent_vectors = tf.random.normal(shape=(batch_size, self.latent_dim))
         generated_images = self.generator([random_latent_vectors, labels])
 
-        combined_images = tf.concat([generated_images, real_images], axis=0)
+        real_images_noisy = real_images + tf.random.normal(shape=tf.shape(real_images), stddev=0.1)
+        generated_images_noisy = generated_images + tf.random.normal(shape=tf.shape(generated_images), stddev=0.1)
+
+        combined_images = tf.concat([generated_images_noisy, real_images_noisy], axis=0)
         combined_labels = tf.concat([labels, labels], axis=0)
         
-        labels_discriminator = tf.concat([tf.zeros((batch_size, 1)), tf.ones((batch_size, 1))], axis=0)
+        labels_discriminator = tf.concat([
+            tf.zeros((batch_size, 1)),
+            tf.ones((batch_size, 1)) * 0.9
+        ], axis=0)
 
         with tf.GradientTape() as tape:
             predictions = self.discriminator([combined_images, combined_labels])
@@ -148,10 +154,13 @@ class GANMonitor(tf.keras.callbacks.Callback):
         generated_images = self.model.generator([self.random_latent_vectors, self.random_labels])
         generated_images = (generated_images * 127.5) + 127.5
 
-        fig = plt.figure(figsize=(4, 4))
+        fig = plt.figure(figsize=(10, 10))
         for i in range(self.num_img):
             plt.subplot(4, 4, i+1)
             plt.imshow(generated_images[i].numpy().astype("uint8"))
+            
+            label_idx = int(self.random_labels[i])
+            plt.title(classes[label_idx], fontsize=9)
             plt.axis('off')
         
         filename = f"training_progress/epoch_{epoch+1}.png"
@@ -160,15 +169,14 @@ class GANMonitor(tf.keras.callbacks.Callback):
         print(f"Saved {filename}")
 
 classifier_model = tf.keras.models.load_model('efficientnet_classifier.h5')
-
 gen = build_generator(NOISE_DIM, num_classes)
 disc = build_discriminator(IMG_SIZE, num_classes)
 
-cgan = CGAN(gen, disc, classifier_model, NOISE_DIM, aux_weight=5.0)
+cgan = CGAN(gen, disc, classifier_model, NOISE_DIM, aux_weight=0.5)
 
 cgan.compile(
     g_optimizer=tf.keras.optimizers.Adam(learning_rate=0.0002, beta_1=0.5),
-    d_optimizer=tf.keras.optimizers.Adam(learning_rate=0.0002, beta_1=0.5),
+    d_optimizer=tf.keras.optimizers.Adam(learning_rate=0.0001, beta_1=0.5),
     loss_fn=tf.keras.losses.BinaryCrossentropy(),
     cls_loss_fn=tf.keras.losses.SparseCategoricalCrossentropy()
 )
