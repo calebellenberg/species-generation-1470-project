@@ -6,3 +6,5 @@ insects
 OLD birds
 train_combined
 attributes.txt
+.DS_Store
+.vscode/launch.json
