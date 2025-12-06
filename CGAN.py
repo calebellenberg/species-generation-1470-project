@@ -13,7 +13,7 @@ IMG_DIR = 'train_combined/train_images'
 
 df = pd.read_csv(CSV_PATH)
 
-classes = df['label'].unique()
+classes = sorted(df['label'].unique())
 class_map = {name: i for i, name in enumerate(classes)}
 num_classes = len(classes)
 
@@ -56,7 +56,7 @@ def build_generator(latent_dim, num_classes):
     x = layers.LeakyReLU(0.2)(x)
 
     out = layers.Conv2D(3, (7,7), activation='tanh', padding='same')(x)
-
+    
     return models.Model([noise_in, label_in], out, name="Generator")
 
 def build_discriminator(img_size, num_classes):
@@ -78,21 +78,25 @@ def build_discriminator(img_size, num_classes):
     
     x = layers.Flatten()(x)
     out = layers.Dense(1, activation='sigmoid')(x)
-
+    
     return models.Model([img_in, label_in], out, name="Discriminator")
 
 class CGAN(tf.keras.Model):
-    def __init__(self, generator, discriminator, latent_dim):
+    def __init__(self, generator, discriminator, classifier, latent_dim, aux_weight=2.0):
         super(CGAN, self).__init__()
         self.generator = generator
         self.discriminator = discriminator
+        self.classifier = classifier
         self.latent_dim = latent_dim
+        self.aux_weight = aux_weight
+        self.classifier.trainable = False # Freeze classifier
 
-    def compile(self, g_optimizer, d_optimizer, loss_fn):
+    def compile(self, g_optimizer, d_optimizer, loss_fn, cls_loss_fn):
         super(CGAN, self).compile()
         self.g_optimizer = g_optimizer
         self.d_optimizer = d_optimizer
         self.loss_fn = loss_fn
+        self.cls_loss_fn = cls_loss_fn
 
     def train_step(self, data):
         real_images, labels = data
@@ -117,13 +121,21 @@ class CGAN(tf.keras.Model):
         misleading_labels = tf.ones((batch_size, 1))
 
         with tf.GradientTape() as tape:
-            predictions = self.discriminator([self.generator([random_latent_vectors, labels]), labels])
-            g_loss = self.loss_fn(misleading_labels, predictions)
+            fake_imgs = self.generator([random_latent_vectors, labels])
+            
+            d_preds = self.discriminator([fake_imgs, labels])
+            g_loss_gan = self.loss_fn(misleading_labels, d_preds)
+            
+            fake_imgs_scaled = (fake_imgs * 127.5) + 127.5
+            c_preds = self.classifier(fake_imgs_scaled)
+            g_loss_class = self.cls_loss_fn(labels, c_preds)
 
-        grads = tape.gradient(g_loss, self.generator.trainable_weights)
+            total_g_loss = g_loss_gan + (self.aux_weight * g_loss_class)
+
+        grads = tape.gradient(total_g_loss, self.generator.trainable_weights)
         self.g_optimizer.apply_gradients(zip(grads, self.generator.trainable_weights))
 
-        return {"d_loss": d_loss, "g_loss": g_loss}
+        return {"d_loss": d_loss, "g_loss": total_g_loss, "class_loss": g_loss_class}
 
 class GANMonitor(tf.keras.callbacks.Callback):
     def __init__(self, num_img=16, latent_dim=128):
@@ -147,14 +159,18 @@ class GANMonitor(tf.keras.callbacks.Callback):
         plt.close()
         print(f"Saved {filename}")
 
+classifier_model = tf.keras.models.load_model('efficientnet_classifier.h5')
+
 gen = build_generator(NOISE_DIM, num_classes)
 disc = build_discriminator(IMG_SIZE, num_classes)
-cgan = CGAN(gen, disc, NOISE_DIM)
+
+cgan = CGAN(gen, disc, classifier_model, NOISE_DIM, aux_weight=5.0)
 
 cgan.compile(
     g_optimizer=tf.keras.optimizers.Adam(learning_rate=0.0002, beta_1=0.5),
     d_optimizer=tf.keras.optimizers.Adam(learning_rate=0.0002, beta_1=0.5),
-    loss_fn=tf.keras.losses.BinaryCrossentropy()
+    loss_fn=tf.keras.losses.BinaryCrossentropy(),
+    cls_loss_fn=tf.keras.losses.SparseCategoricalCrossentropy()
 )
 
 monitor = GANMonitor(num_img=16, latent_dim=NOISE_DIM)
