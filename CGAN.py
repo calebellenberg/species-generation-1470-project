@@ -38,21 +38,33 @@ def build_generator(latent_dim, num_classes):
     l = layers.Reshape((8, 8, 1))(l) 
 
     noise_in = layers.Input(shape=(latent_dim,), name='gen_noise_in')
-    n = layers.Dense(8 * 8 * 128)(noise_in)
-    n = layers.Reshape((8, 8, 128))(n)
+    n = layers.Dense(8 * 8 * 512)(noise_in)
+    n = layers.Reshape((8, 8, 512))(n)
 
-    merge = layers.Concatenate()([n, l])
+    x = layers.Concatenate()([n, l])
 
-    x = layers.Conv2DTranspose(128, (4,4), strides=(2,2), padding='same')(merge)
+    x = layers.UpSampling2D()(x)
+    x = layers.Conv2D(256, (3,3), padding='same')(x)
+    x = layers.BatchNormalization()(x)
     x = layers.LeakyReLU(0.2)(x)
     
-    x = layers.Conv2DTranspose(128, (4,4), strides=(2,2), padding='same')(x)
+    x = layers.UpSampling2D()(x)
+    x = layers.Conv2D(128, (3,3), padding='same')(x)
+    x = layers.BatchNormalization()(x)
     x = layers.LeakyReLU(0.2)(x)
     
-    x = layers.Conv2DTranspose(128, (4,4), strides=(2,2), padding='same')(x)
+    x = layers.UpSampling2D()(x)
+    x = layers.Conv2D(128, (3,3), padding='same')(x)
+    x = layers.BatchNormalization()(x)
     x = layers.LeakyReLU(0.2)(x)
     
-    x = layers.Conv2DTranspose(64, (4,4), strides=(2,2), padding='same')(x)
+    x = layers.UpSampling2D()(x)
+    x = layers.Conv2D(64, (3,3), padding='same')(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.LeakyReLU(0.2)(x)
+
+    x = layers.Conv2D(64, (3,3), padding='same')(x)
+    x = layers.BatchNormalization()(x)
     x = layers.LeakyReLU(0.2)(x)
 
     out = layers.Conv2D(3, (7,7), activation='tanh', padding='same')(x)
@@ -71,9 +83,14 @@ def build_discriminator(img_size, num_classes):
 
     x = layers.Conv2D(64, (4,4), strides=(2,2), padding='same')(merge)
     x = layers.LeakyReLU(0.2)(x)
+    
     x = layers.Conv2D(128, (4,4), strides=(2,2), padding='same')(x)
     x = layers.LeakyReLU(0.2)(x)
+    
     x = layers.Conv2D(256, (4,4), strides=(2,2), padding='same')(x)
+    x = layers.LeakyReLU(0.2)(x)
+    
+    x = layers.Conv2D(512, (4,4), strides=(2,2), padding='same')(x)
     x = layers.LeakyReLU(0.2)(x)
     
     x = layers.Flatten()(x)
@@ -116,21 +133,20 @@ class CGAN(tf.keras.Model):
         real_images, labels = data
         batch_size = tf.shape(real_images)[0]
         
-        with tf.GradientTape() as tape:
-            random_latent_vectors = tf.random.normal(shape=(batch_size, self.latent_dim))
-            fake_images = self.generator([random_latent_vectors, labels], training=True)
+        for i in range(5):
+            with tf.GradientTape() as tape:
+                random_latent_vectors = tf.random.normal(shape=(batch_size, self.latent_dim))
+                fake_images = self.generator([random_latent_vectors, labels], training=True)
 
-            real_logits = self.discriminator([real_images, labels], training=True)
-            fake_logits = self.discriminator([fake_images, labels], training=True)
+                real_logits = self.discriminator([real_images, labels], training=True)
+                fake_logits = self.discriminator([fake_images, labels], training=True)
 
-            d_cost = tf.reduce_mean(fake_logits) - tf.reduce_mean(real_logits)
-            
-            gp = self.gradient_penalty(batch_size, real_images, fake_images, labels)
-            
-            d_loss = d_cost + (gp * self.gp_weight)
+                d_cost = tf.reduce_mean(fake_logits) - tf.reduce_mean(real_logits)
+                gp = self.gradient_penalty(batch_size, real_images, fake_images, labels)
+                d_loss = d_cost + (gp * self.gp_weight)
 
-        d_grads = tape.gradient(d_loss, self.discriminator.trainable_weights)
-        self.d_optimizer.apply_gradients(zip(d_grads, self.discriminator.trainable_weights))
+            d_grads = tape.gradient(d_loss, self.discriminator.trainable_weights)
+            self.d_optimizer.apply_gradients(zip(d_grads, self.discriminator.trainable_weights))
 
         with tf.GradientTape() as tape:
             random_latent_vectors = tf.random.normal(shape=(batch_size, self.latent_dim))
@@ -183,8 +199,8 @@ disc = build_discriminator(IMG_SIZE, num_classes)
 cgan = CGAN(gen, disc, classifier_model, NOISE_DIM, aux_weight=0.5)
 
 cgan.compile(
-    g_optimizer=tf.keras.optimizers.Adam(learning_rate=0.0002, beta_1=0.5, beta_2=0.9),
-    d_optimizer=tf.keras.optimizers.Adam(learning_rate=0.0001, beta_1=0.5, beta_2=0.9),
+    g_optimizer=tf.keras.optimizers.Adam(learning_rate=0.0001, beta_1=0.0, beta_2=0.9),
+    d_optimizer=tf.keras.optimizers.Adam(learning_rate=0.0001, beta_1=0.0, beta_2=0.9),
     cls_loss_fn=tf.keras.losses.SparseCategoricalCrossentropy()
 )
 
