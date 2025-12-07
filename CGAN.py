@@ -20,6 +20,12 @@ num_classes = len(classes)
 img_paths = [os.path.join(IMG_DIR, f) for f in df['filename']]
 labels = [class_map[l] for l in df['label']]
 
+data_augmentation = tf.keras.Sequential([
+    layers.RandomFlip("horizontal"),
+    layers.RandomRotation(0.1),
+    layers.RandomZoom(0.1),
+])
+
 def load_img(path, label):
     img = tf.io.read_file(path)
     img = tf.image.decode_jpeg(img, channels=3)
@@ -29,6 +35,7 @@ def load_img(path, label):
 
 dataset = tf.data.Dataset.from_tensor_slices((img_paths, labels))
 dataset = dataset.map(load_img, num_parallel_calls=tf.data.AUTOTUNE)
+dataset = dataset.map(lambda x, y: (data_augmentation(x, training=True), y), num_parallel_calls=tf.data.AUTOTUNE)
 dataset = dataset.shuffle(1000).batch(BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
 
 def build_generator(latent_dim, num_classes):
@@ -44,26 +51,26 @@ def build_generator(latent_dim, num_classes):
     x = layers.Concatenate()([n, l])
 
     x = layers.UpSampling2D()(x)
-    x = layers.Conv2D(256, (3,3), padding='same')(x)
+    x = layers.Conv2D(256, (3,3), padding='same', use_bias=False)(x)
     x = layers.BatchNormalization()(x)
     x = layers.LeakyReLU(0.2)(x)
     
     x = layers.UpSampling2D()(x)
-    x = layers.Conv2D(128, (3,3), padding='same')(x)
+    x = layers.Conv2D(128, (3,3), padding='same', use_bias=False)(x)
     x = layers.BatchNormalization()(x)
     x = layers.LeakyReLU(0.2)(x)
     
     x = layers.UpSampling2D()(x)
-    x = layers.Conv2D(128, (3,3), padding='same')(x)
+    x = layers.Conv2D(128, (3,3), padding='same', use_bias=False)(x)
     x = layers.BatchNormalization()(x)
     x = layers.LeakyReLU(0.2)(x)
     
     x = layers.UpSampling2D()(x)
-    x = layers.Conv2D(64, (3,3), padding='same')(x)
+    x = layers.Conv2D(64, (3,3), padding='same', use_bias=False)(x)
     x = layers.BatchNormalization()(x)
     x = layers.LeakyReLU(0.2)(x)
 
-    x = layers.Conv2D(64, (3,3), padding='same')(x)
+    x = layers.Conv2D(64, (3,3), padding='same', use_bias=False)(x)
     x = layers.BatchNormalization()(x)
     x = layers.LeakyReLU(0.2)(x)
 
@@ -85,12 +92,15 @@ def build_discriminator(img_size, num_classes):
     x = layers.LeakyReLU(0.2)(x)
     
     x = layers.Conv2D(128, (4,4), strides=(2,2), padding='same')(x)
+    x = layers.LayerNormalization()(x)
     x = layers.LeakyReLU(0.2)(x)
     
     x = layers.Conv2D(256, (4,4), strides=(2,2), padding='same')(x)
+    x = layers.LayerNormalization()(x)
     x = layers.LeakyReLU(0.2)(x)
     
     x = layers.Conv2D(512, (4,4), strides=(2,2), padding='same')(x)
+    x = layers.LayerNormalization()(x)
     x = layers.LeakyReLU(0.2)(x)
     
     x = layers.Flatten()(x)
