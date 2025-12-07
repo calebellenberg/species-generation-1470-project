@@ -187,7 +187,7 @@ cgan.compile(
 
 monitor = GANMonitor(num_img=16, latent_dim=NOISE_DIM)
 
-cgan.fit(dataset, epochs=100, callbacks=[monitor])
+cgan.fit(dataset, epochs=1000, callbacks=[monitor])
 
 cgan.generator.save_weights('binary_cgan_generator.weights.h5')
 cgan.discriminator.save_weights('binary_cgan_discriminator.weights.h5')
