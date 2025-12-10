@@ -48,6 +48,24 @@ model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accur
 # train model
 history = model.fit(train_gen, validation_data=val_gen, epochs=20)
 
+# plot loss over training
+plt.figure(figsize=(8, 6))
+plt.plot(history.history['loss'], label='Train Loss')
+plt.plot(history.history['val_loss'], label='Val Loss')
+plt.ylabel('Loss')
+plt.xlabel('Epoch')
+plt.legend()
+plt.show()
+
+# also plot accuracy
+plt.figure(figsize=(8, 6))
+plt.plot(history.history['accuracy'], label='Train Accuracy')
+plt.plot(history.history['val_accuracy'], label='Val Accuracy')
+plt.ylabel('Accuracy')
+plt.xlabel('Epoch')
+plt.legend()
+plt.show()
+
 # show 9 random classsifications
 x_val, y_val = next(val_gen)
 preds = model.predict(x_val, verbose=0)
