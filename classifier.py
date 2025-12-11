@@ -7,14 +7,17 @@ from tensorflow.keras.applications.efficientnet import preprocess_input
 from tensorflow.keras import layers, models, optimizers
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 
+# set up files and hyperparams
 DATA_DIR = "train_combined/train_images"
 CSV_PATH = "train_combined/train_combined.csv"
 IMG_SIZE, BATCH_SIZE = 128, 64
 
-# set up data
+# set up data frame
 df = pd.read_csv(CSV_PATH, dtype=str)
 
 df = df.sample(frac=1, random_state=42).reset_index(drop=True)
+
+# split into train and validation
 
 datagen = ImageDataGenerator(
     preprocessing_function=preprocess_input,
@@ -33,8 +36,11 @@ val_gen = datagen.flow_from_dataframe(
 
 # fine tuning on top of EfficientNetB0 base
 base = EfficientNetB0(include_top=False, input_shape=(IMG_SIZE, IMG_SIZE, 3), weights='imagenet')
+# don't train the existing EfficientNet weights
 base.trainable = False
 
+
+# classifier architecture to go on top of EfficientNet
 model = models.Sequential([
     base,
     layers.GlobalAveragePooling2D(),
